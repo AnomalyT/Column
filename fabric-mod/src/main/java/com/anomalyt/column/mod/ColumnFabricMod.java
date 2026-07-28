@@ -1,12 +1,15 @@
 package com.anomalyt.column.mod;
 
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpServer;
 import net.fabricmc.api.ClientModInitializer;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -16,8 +19,11 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 public class ColumnFabricMod implements ClientModInitializer {
+    private static final int DEFAULT_DASHBOARD_PORT = 8765;
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-    private HttpServer server;
+    private ServerSocket serverSocket;
+    private Thread serverThread;
+    private int boundPort = -1;
 
     @Override
     public void onInitializeClient() {
@@ -30,20 +36,25 @@ public class ColumnFabricMod implements ClientModInitializer {
     }
 
     public void start() {
-        try {
-            if (server == null) {
-                server = HttpServer.create(new InetSocketAddress("127.0.0.1", 8765), 0);
-                server.createContext("/", this::handleRoot);
-                server.createContext("/health", this::handleHealth);
-                server.createContext("/api/state", this::handleState);
-                server.createContext("/players", this::handlePlayers);
-                server.createContext("/activity", this::handleActivity);
-                server.setExecutor(null);
-                server.start();
+        if (serverSocket != null || serverThread != null) {
+            return;
+        }
+
+        for (int port : new int[]{DEFAULT_DASHBOARD_PORT, 8766, 0}) {
+            try {
+                serverSocket = new ServerSocket();
+                serverSocket.setReuseAddress(true);
+                serverSocket.bind(new InetSocketAddress("127.0.0.1", port));
+                boundPort = serverSocket.getLocalPort();
+                System.out.println("[Column] Dashboard ready at http://127.0.0.1:" + boundPort + "/");
+                serverThread = new Thread(this::acceptLoop, "column-dashboard");
+                serverThread.setDaemon(true);
+                serverThread.start();
+                scheduler.scheduleAtFixedRate(this::refresh, 0, 2, TimeUnit.SECONDS);
+                break;
+            } catch (Throwable error) {
+                System.err.println("[Column] Dashboard bind failed on port " + port + ": " + error.getMessage());
             }
-            scheduler.scheduleAtFixedRate(this::refresh, 0, 2, TimeUnit.SECONDS);
-        } catch (Throwable ignored) {
-            // Ignore local startup failures so Column remains non-invasive.
         }
     }
 
@@ -53,11 +64,24 @@ public class ColumnFabricMod implements ClientModInitializer {
         } catch (Throwable ignored) {
         }
         try {
-            if (server != null) {
-                server.stop(0);
+            if (serverThread != null) {
+                serverThread.interrupt();
             }
         } catch (Throwable ignored) {
         }
+        try {
+            if (serverSocket != null && !serverSocket.isClosed()) {
+                serverSocket.close();
+            }
+        } catch (Throwable ignored) {
+        }
+        serverSocket = null;
+        serverThread = null;
+        boundPort = -1;
+    }
+
+    public int getDashboardPort() {
+        return boundPort;
     }
 
     public String buildDashboardPage() {
@@ -124,7 +148,7 @@ public class ColumnFabricMod implements ClientModInitializer {
                         function render() {
                             heatmap.innerHTML = '';
                             if (!layerState.activity && !layerState.online && !layerState.offline && !layerState.spawnpoints) {
-                                heatmap.innerHTML = '<div style=\"position:absolute;inset:0;display:grid;place-items:center;color:#94a3b8;\">No layers enabled</div>';
+                                heatmap.innerHTML = '<div style="position:absolute;inset:0;display:grid;place-items:center;color:#94a3b8;">No layers enabled</div>';
                                 return;
                             }
 
@@ -201,38 +225,69 @@ public class ColumnFabricMod implements ClientModInitializer {
         }
     }
 
-    private void handleRoot(HttpExchange exchange) throws IOException {
-        byte[] payload = buildDashboardPage().getBytes(StandardCharsets.UTF_8);
-        send(exchange, 200, payload, "text/html; charset=utf-8");
-    }
-
-    private void handleHealth(HttpExchange exchange) throws IOException {
-        send(exchange, 200, "ok".getBytes(StandardCharsets.UTF_8), "text/plain; charset=utf-8");
-    }
-
-    private void handleState(HttpExchange exchange) throws IOException {
-        Path statePath = Paths.get("plugins", "column", "state.json");
-        if (Files.exists(statePath)) {
-            byte[] payload = Files.readString(statePath).getBytes(StandardCharsets.UTF_8);
-            send(exchange, 200, payload, "application/json; charset=utf-8");
-        } else {
-            send(exchange, 200, "{\"players\":[],\"spawnPoints\":[],\"activity\":[]}".getBytes(StandardCharsets.UTF_8), "application/json; charset=utf-8");
+    private void acceptLoop() {
+        while (!Thread.currentThread().isInterrupted() && serverSocket != null) {
+            try (Socket client = serverSocket.accept()) {
+                handleClient(client);
+            } catch (SocketException ignored) {
+                break;
+            } catch (IOException ignored) {
+            }
         }
     }
 
-    private void handlePlayers(HttpExchange exchange) throws IOException {
-        handleState(exchange);
-    }
+    private void handleClient(Socket client) throws IOException {
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(client.getInputStream(), StandardCharsets.UTF_8));
+             OutputStream output = client.getOutputStream()) {
+            String requestLine = reader.readLine();
+            if (requestLine == null) {
+                return;
+            }
 
-    private void handleActivity(HttpExchange exchange) throws IOException {
-        handleState(exchange);
-    }
+            String[] requestParts = requestLine.split(" ");
+            String path = requestParts.length > 1 ? requestParts[1] : "/";
+            String[] pathParts = path.split("\\?", 2);
+            String requestPath = pathParts[0];
 
-    private void send(HttpExchange exchange, int status, byte[] payload, String contentType) throws IOException {
-        exchange.getResponseHeaders().set("Content-Type", contentType);
-        exchange.sendResponseHeaders(status, payload.length);
-        try (OutputStream os = exchange.getResponseBody()) {
-            os.write(payload);
+            byte[] payload;
+            String contentType;
+            if ("/health".equals(requestPath)) {
+                payload = "ok".getBytes(StandardCharsets.UTF_8);
+                contentType = "text/plain; charset=utf-8";
+            } else if ("/api/state".equals(requestPath) || "/players".equals(requestPath) || "/activity".equals(requestPath)) {
+                payload = readStatePayload();
+                contentType = "application/json; charset=utf-8";
+            } else {
+                payload = buildDashboardPage().getBytes(StandardCharsets.UTF_8);
+                contentType = "text/html; charset=utf-8";
+            }
+
+            String response = "HTTP/1.1 200 OK\r\n"
+                    + "Content-Type: " + contentType + "\r\n"
+                    + "Content-Length: " + payload.length + "\r\n"
+                    + "Connection: close\r\n"
+                    + "\r\n";
+            output.write(response.getBytes(StandardCharsets.UTF_8));
+            output.write(payload);
         }
+    }
+
+    private byte[] readStatePayload() {
+        Path[] candidatePaths = {
+                Paths.get("mods", "column", "state.json"),
+                Paths.get("plugins", "column", "state.json"),
+                Paths.get("state.json")
+        };
+
+        for (Path statePath : candidatePaths) {
+            if (Files.exists(statePath)) {
+                try {
+                    return Files.readString(statePath).getBytes(StandardCharsets.UTF_8);
+                } catch (IOException ignored) {
+                }
+            }
+        }
+
+        return "{\"players\":[],\"spawnPoints\":[],\"activity\":[]}".getBytes(StandardCharsets.UTF_8);
     }
 }

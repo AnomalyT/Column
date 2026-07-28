@@ -26,9 +26,16 @@ public class ColumnPaperPlugin extends JavaPlugin implements Listener, CommandEx
 
     @Override
     public void onEnable() {
-        saveDefaultConfig();
+        try {
+            saveDefaultConfig();
+        } catch (IllegalArgumentException ex) {
+            getLogger().warning("Column config resource missing; continuing with defaults: " + ex.getMessage());
+        }
+
         getServer().getPluginManager().registerEvents(this, this);
-        getCommand("columnstatus").setExecutor(this);
+        if (getCommand("columnstatus") != null) {
+            getCommand("columnstatus").setExecutor(this);
+        }
         try {
             tracker.start();
         } catch (IOException ignored) {

@@ -1,0 +1,4 @@
+# Default Column configuration
+tracking:
+  enabled: true
+  interval-seconds: 2
