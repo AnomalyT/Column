@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "column",
+  "version": "0.1.0",
+  "name": "Column",
+  "description": "Client-side companion for reading player position and activity data from the Column plugin.",
+  "authors": ["AnomalyT"],
+  "environment": "client",
+  "entrypoints": {
+    "client": ["com.anomalyt.column.mod.ColumnFabricMod"],
+    "main": []
+  },
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "1.21.11"
+  }
+}

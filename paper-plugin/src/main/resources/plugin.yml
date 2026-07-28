@@ -1,0 +1,6 @@
+name: Column
+main: com.anomalyt.column.plugin.ColumnPlugin
+version: 0.1.0
+api-version: "1.21"
+description: Logs player movement, exposes player positions to the Fabric client, and provides a heatmap feed.
+author: AnomalyT
