@@ -6,6 +6,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -20,14 +21,18 @@ import java.util.concurrent.TimeUnit;
 
 public class ColumnFabricMod implements ClientModInitializer {
     private static final int DEFAULT_DASHBOARD_PORT = 8765;
+    private static volatile ColumnFabricMod instance;
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     private ServerSocket serverSocket;
     private Thread serverThread;
     private int boundPort = -1;
+    private volatile boolean overlayEnabled = true;
+    private volatile String lastStatusLine = "Column idle";
 
     @Override
     public void onInitializeClient() {
         try {
+            instance = this;
             ColumnStatusCommand.register();
             start();
         } catch (Throwable ignored) {
@@ -50,6 +55,7 @@ public class ColumnFabricMod implements ClientModInitializer {
                 serverThread = new Thread(this::acceptLoop, "column-dashboard");
                 serverThread.setDaemon(true);
                 serverThread.start();
+                lastStatusLine = "dashboard ready";
                 scheduler.scheduleAtFixedRate(this::refresh, 0, 2, TimeUnit.SECONDS);
                 break;
             } catch (Throwable error) {
@@ -82,6 +88,18 @@ public class ColumnFabricMod implements ClientModInitializer {
 
     public int getDashboardPort() {
         return boundPort;
+    }
+
+    public static ColumnFabricMod getInstance() {
+        return instance;
+    }
+
+    public void setOverlayEnabled(boolean enabled) {
+        this.overlayEnabled = enabled;
+    }
+
+    public String buildDebugSummary() {
+        return "Column HUD " + (overlayEnabled ? "on" : "off") + " | dashboard=" + (boundPort > 0 ? "http://127.0.0.1:" + boundPort + "/" : "offline") + " | status=" + lastStatusLine;
     }
 
     public String buildDashboardPage() {
@@ -221,8 +239,11 @@ public class ColumnFabricMod implements ClientModInitializer {
             Path dataFile = Paths.get("mods", "column", "state.json");
             Files.createDirectories(dataFile.getParent());
             Files.writeString(dataFile, "{\"status\":\"ready\"}", StandardCharsets.UTF_8);
+            lastStatusLine = "state ready";
         } catch (Throwable ignored) {
+            lastStatusLine = "state pending";
         }
+        updateOverlayInGame();
     }
 
     private void acceptLoop() {
@@ -269,6 +290,23 @@ public class ColumnFabricMod implements ClientModInitializer {
                     + "\r\n";
             output.write(response.getBytes(StandardCharsets.UTF_8));
             output.write(payload);
+        }
+    }
+
+    private void updateOverlayInGame() {
+        if (!overlayEnabled) {
+            return;
+        }
+
+        try {
+            Class<?> minecraftClientClass = Class.forName("net.minecraft.client.MinecraftClient");
+            Object minecraftClient = minecraftClientClass.getMethod("getInstance").invoke(null);
+            Object inGameHud = minecraftClient.getClass().getField("inGameHud").get(minecraftClient);
+            Class<?> textClass = Class.forName("net.minecraft.text.Text");
+            Object text = textClass.getMethod("literal", String.class).invoke(null, buildDebugSummary());
+            Method method = inGameHud.getClass().getMethod("setOverlayMessage", textClass, boolean.class);
+            method.invoke(inGameHud, text, false);
+        } catch (Throwable ignored) {
         }
     }
 

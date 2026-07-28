@@ -18,7 +18,12 @@ public class ColumnStatusCommand {
                         try {
                             Object source = context.getClass().getMethod("getSource").invoke(context);
                             Method sendFeedback = source.getClass().getMethod("sendFeedback", String.class);
-                            sendFeedback.invoke(source, "Column status: running locally");
+                            ColumnFabricMod mod = ColumnFabricMod.getInstance();
+                            if (mod != null) {
+                                sendFeedback.invoke(source, mod.buildDebugSummary());
+                            } else {
+                                sendFeedback.invoke(source, "Column status: running locally");
+                            }
                         } catch (Exception ignored) {
                         }
                         return 1;

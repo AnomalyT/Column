@@ -35,4 +35,14 @@ class ColumnFabricModTest {
             mod.stop();
         }
     }
+
+    @Test
+    void debugSummaryIncludesDashboardAndStatus() {
+        ColumnFabricMod mod = new ColumnFabricMod();
+        String summary = mod.buildDebugSummary();
+
+        assertTrue(summary.contains("Column HUD"));
+        assertTrue(summary.contains("dashboard="));
+        assertTrue(summary.contains("status="));
+    }
 }
