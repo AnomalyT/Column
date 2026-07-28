@@ -2,6 +2,7 @@ package com.anomalyt.column.mod;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import net.fabricmc.api.ClientModInitializer;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -14,29 +15,48 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
-public class ColumnFabricMod {
+public class ColumnFabricMod implements ClientModInitializer {
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     private HttpServer server;
 
+    @Override
+    public void onInitializeClient() {
+        try {
+            ColumnStatusCommand.register();
+            start();
+        } catch (Throwable ignored) {
+            // Keep Column from crashing the client if its local dashboard setup fails.
+        }
+    }
+
     public void start() {
         try {
-            server = HttpServer.create(new InetSocketAddress(8765), 0);
-            server.createContext("/", this::handleRoot);
-            server.createContext("/health", this::handleHealth);
-            server.createContext("/api/state", this::handleState);
-            server.createContext("/players", this::handlePlayers);
-            server.createContext("/activity", this::handleActivity);
-            server.setExecutor(null);
-            server.start();
-        } catch (IOException ignored) {
+            if (server == null) {
+                server = HttpServer.create(new InetSocketAddress("127.0.0.1", 8765), 0);
+                server.createContext("/", this::handleRoot);
+                server.createContext("/health", this::handleHealth);
+                server.createContext("/api/state", this::handleState);
+                server.createContext("/players", this::handlePlayers);
+                server.createContext("/activity", this::handleActivity);
+                server.setExecutor(null);
+                server.start();
+            }
+            scheduler.scheduleAtFixedRate(this::refresh, 0, 2, TimeUnit.SECONDS);
+        } catch (Throwable ignored) {
+            // Ignore local startup failures so Column remains non-invasive.
         }
-        scheduler.scheduleAtFixedRate(this::refresh, 0, 2, TimeUnit.SECONDS);
     }
 
     public void stop() {
-        scheduler.shutdownNow();
-        if (server != null) {
-            server.stop(0);
+        try {
+            scheduler.shutdownNow();
+        } catch (Throwable ignored) {
+        }
+        try {
+            if (server != null) {
+                server.stop(0);
+            }
+        } catch (Throwable ignored) {
         }
     }
 
@@ -173,11 +193,11 @@ public class ColumnFabricMod {
     }
 
     private void refresh() {
-        Path dataFile = Paths.get("mods", "column", "state.json");
         try {
+            Path dataFile = Paths.get("mods", "column", "state.json");
             Files.createDirectories(dataFile.getParent());
             Files.writeString(dataFile, "{\"status\":\"ready\"}", StandardCharsets.UTF_8);
-        } catch (IOException ignored) {
+        } catch (Throwable ignored) {
         }
     }
 

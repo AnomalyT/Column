@@ -7,11 +7,10 @@
   "authors": ["AnomalyT"],
   "environment": "client",
   "entrypoints": {
-    "client": ["com.anomalyt.column.mod.ColumnFabricMod"],
-    "main": []
+    "client": ["com.anomalyt.column.mod.ColumnFabricMod"]
   },
   "depends": {
-    "fabricloader": ">=0.16.0",
+    "fabricloader": ">=0.19.3",
     "minecraft": "1.21.11"
   }
 }
