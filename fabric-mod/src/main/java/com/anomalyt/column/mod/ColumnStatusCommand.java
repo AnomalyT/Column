@@ -20,9 +20,13 @@ public class ColumnStatusCommand {
                             Method sendFeedback = source.getClass().getMethod("sendFeedback", String.class);
                             ColumnFabricMod mod = ColumnFabricMod.getInstance();
                             if (mod != null) {
-                                sendFeedback.invoke(source, mod.buildDebugSummary());
+                                String summary = mod.buildDebugSummary();
+                                System.out.println("[Column] status command: " + summary);
+                                sendFeedback.invoke(source, summary);
                             } else {
-                                sendFeedback.invoke(source, "Column status: running locally");
+                                String summary = "Column status: running locally";
+                                System.out.println("[Column] status command: " + summary);
+                                sendFeedback.invoke(source, summary);
                             }
                         } catch (Exception ignored) {
                         }

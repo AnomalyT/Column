@@ -51,7 +51,9 @@ public class ColumnFabricMod implements ClientModInitializer {
                 serverSocket.setReuseAddress(true);
                 serverSocket.bind(new InetSocketAddress("127.0.0.1", port));
                 boundPort = serverSocket.getLocalPort();
-                System.out.println("[Column] Dashboard ready at http://127.0.0.1:" + boundPort + "/");
+                String readyMessage = "[Column] Dashboard ready at http://127.0.0.1:" + boundPort + "/ | status=" + buildDebugSummary();
+                System.out.println(readyMessage);
+                System.err.println(readyMessage);
                 serverThread = new Thread(this::acceptLoop, "column-dashboard");
                 serverThread.setDaemon(true);
                 serverThread.start();
